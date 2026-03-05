@@ -1,0 +1,57 @@
+version: "3.9"
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: traffic-redis
+    ports:
+      - "6379:6379"
+    restart: always
+    networks:
+      - traffic-net
+
+  backend:
+    build:
+      context: ./backend
+    container_name: traffic-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - redis
+    restart: always
+    networks:
+      - traffic-net
+
+  edge-ai:
+    build:
+      context: ./edge
+    container_name: traffic-edge-ai
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - PUBLISH_INTERVAL=1
+      - AMBULANCE_EVERY=45
+    depends_on:
+      - redis
+    restart: always
+    networks:
+      - traffic-net
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: traffic-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_BACKEND_URL=http://backend:8000
+    depends_on:
+      - backend
+    restart: always
+    networks:
+      - traffic-net
+
+networks:
+  traffic-net:
+    name: traffic-net
