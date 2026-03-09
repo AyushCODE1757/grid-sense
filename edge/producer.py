@@ -23,23 +23,6 @@ def get_lane(cx: float, cy: float, fw: int, fh: int) -> str:
         return "West"
 
 
-def is_emergency(frame, x1, y1, x2, y2) -> bool:
-    try:
-        roi = frame[int(y1):int(y2), int(x1):int(x2)]
-        if roi.size == 0:
-            return False
-        hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-        red1 = cv2.inRange(hsv, (0, 120, 120), (10, 255, 255))
-        red2 = cv2.inRange(hsv, (160, 120, 120), (180, 255, 255))
-        blue = cv2.inRange(hsv, (100, 120, 100), (130, 255, 255))
-        total = roi.shape[0] * roi.shape[1]
-        if total == 0:
-            return False
-        return (cv2.countNonZero(red1) + cv2.countNonZero(red2) + cv2.countNonZero(blue)) / total > 0.15
-    except Exception:
-        return False
-
-
 def connect_redis(url: str) -> redis.Redis:
     for i in range(10):
         try:
@@ -70,7 +53,6 @@ def run():
     print(f"🎬 Processing: {video_path}")
     print("🚦 YOLO running — publishing to Redis every 1s")
 
-    emergency_hits = {lane: 0 for lane in LANES}
     frame_idx = 0
     last_publish = time.time()
 
@@ -89,7 +71,6 @@ def run():
         results = model(frame, verbose=False)[0]
 
         lane_counts = {lane: 0 for lane in LANES}
-        lane_emergency = {lane: False for lane in LANES}
 
         for box in results.boxes:
             if int(box.cls) not in VEHICLE_CLASSES:
@@ -97,14 +78,6 @@ def run():
             x1, y1, x2, y2 = box.xyxy[0].tolist()
             lane = get_lane((x1 + x2) / 2, (y1 + y2) / 2, fw, fh)
             lane_counts[lane] += 1
-            if is_emergency(frame, x1, y1, x2, y2):
-                lane_emergency[lane] = True
-
-        for lane in LANES:
-            if lane_emergency[lane]:
-                emergency_hits[lane] = min(emergency_hits[lane] + 1, 3)
-            else:
-                emergency_hits[lane] = max(emergency_hits[lane] - 1, 0)
 
         if time.time() - last_publish >= interval:
             for lane in LANES:
@@ -113,7 +86,7 @@ def run():
                     "lane": lane,
                     "count": count,
                     "density": round(min((count / 15) * 100, 100.0), 1),
-                    "ambulance": emergency_hits[lane] >= 3,
+                    "ambulance": False,  # only trigger via dashboard button
                     "ts": int(time.time()),
                 }
                 r.publish(CHANNEL, json.dumps(payload))
